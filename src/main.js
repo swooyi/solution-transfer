@@ -39,6 +39,7 @@ const outputCardsByPuzzle = {
 const state = {
   selectedPuzzle: "3x3",
   inputAlgorithm: "",
+  outputFormat: "compact",
   visibleOutputCards: outputCardsByPuzzle["3x3"],
   outputs: null,
   errorMessage: "",
@@ -93,7 +94,11 @@ function getOutputDisplay(type) {
     };
   }
 
-  const value = state.outputs?.[type] ?? "";
+  const rawValue = state.outputs?.[type] ?? "";
+  const value =
+    typeof rawValue === "object" && rawValue !== null
+      ? rawValue[state.outputFormat] ?? ""
+      : rawValue;
 
   return {
     value,
@@ -103,9 +108,38 @@ function getOutputDisplay(type) {
 }
 
 function renderOutputs() {
-  return state.visibleOutputCards
+  return `
+    ${renderOutputFormatToggle()}
+    ${state.visibleOutputCards
     .map((card) => renderOutputCard(card))
-    .join("");
+    .join("")}
+  `;
+}
+
+function renderOutputFormatToggle() {
+  return `
+    <div class="output-format" aria-label="출력 표시 방식">
+      <span>커뮤테이터 표시 방식</span>
+      <div class="output-format__buttons">
+        <button
+          class="output-format__button"
+          type="button"
+          data-output-format="compact"
+          aria-pressed="${state.outputFormat === "compact"}"
+        >
+          축약
+        </button>
+        <button
+          class="output-format__button"
+          type="button"
+          data-output-format="expanded"
+          aria-pressed="${state.outputFormat === "expanded"}"
+        >
+          풀어쓰기
+        </button>
+      </div>
+    </div>
+  `;
 }
 
 function renderOutputCard(card) {
@@ -186,6 +220,10 @@ function render() {
                   [R, U F]
                   R : U F
 
+                  [X,Y] = X Y X' Y'
+                  X:Y = X Y X'
+                  X와 Y에는 여러 회전을 넣을 수 있습니다.
+
                   // 뒤의 내용은 라인 주석으로 처리되어 그대로 출력됩니다.
                   예: R U R' U' // 트위스트
                 </span>
@@ -213,7 +251,11 @@ function render() {
 }
 
 function copyOutput(type) {
-  const value = state.outputs?.[type];
+  const rawValue = state.outputs?.[type];
+  const value =
+    typeof rawValue === "object" && rawValue !== null
+      ? rawValue[state.outputFormat]
+      : rawValue;
 
   if (!value) {
     return;
@@ -245,6 +287,13 @@ app.addEventListener("input", (event) => {
 });
 
 app.addEventListener("click", (event) => {
+  const outputFormatButton = event.target.closest("[data-output-format]");
+  if (outputFormatButton) {
+    state.outputFormat = outputFormatButton.dataset.outputFormat;
+    document.querySelector(".output-panel").innerHTML = renderOutputs();
+    return;
+  }
+
   const transformButton = event.target.closest("[data-transform]");
   if (transformButton) {
     const input = state.inputAlgorithm;

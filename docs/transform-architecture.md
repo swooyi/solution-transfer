@@ -46,17 +46,17 @@ UI는 변환 결과를 다음 형태로 받는다.
 
 ```js
 {
-  inverse: "",
-  mirrorLeftRight: "",
-  mirrorLeftRightInverse: "",
-  mirrorFrontBack: "",
-  mirrorFrontBackInverse: "",
-  mirrorUpDown: "",
-  mirrorUpDownInverse: ""
+  inverse: { compact: "", expanded: "" },
+  mirrorLeftRight: { compact: "", expanded: "" },
+  mirrorLeftRightInverse: { compact: "", expanded: "" },
+  mirrorFrontBack: { compact: "", expanded: "" },
+  mirrorFrontBackInverse: { compact: "", expanded: "" },
+  mirrorUpDown: { compact: "", expanded: "" },
+  mirrorUpDownInverse: { compact: "", expanded: "" }
 }
 ```
 
-퍼즐에서 지원하지 않는 변환은 반환하지 않거나 빈 문자열로 둔다. UI는 퍼즐별 출력 카드 목록을 기준으로 표시 여부를 결정한다.
+퍼즐에서 지원하지 않는 변환은 반환하지 않거나 빈 문자열로 둔다. UI는 퍼즐별 출력 카드 목록을 기준으로 표시 여부를 결정한다. `compact`는 커뮤테이터와 컨쥬게이트 축약 구조를 가능한 유지한 출력이고, `expanded`는 축약 구조를 모두 풀어쓴 출력이다. UI는 토글 버튼으로 두 표시 방식을 전환한다.
 
 `대칭의 역공식`은 원본 공식의 역공식을 대칭하는 것이 아니라, 대칭 변환 결과를 다시 역공식으로 변환한 값이다.
 
@@ -92,9 +92,9 @@ UI는 변환 결과를 다음 형태로 받는다.
 해석: R U F B R U R' F
 ```
 
-## 확장 계획
+## 커뮤테이터와 컨쥬게이트
 
-커뮤테이터와 컨쥬게이트 축약 입력은 라인 주석 분리 후, 일반 토큰 파싱 전에 확장한다.
+커뮤테이터와 컨쥬게이트 축약 입력은 라인 주석 분리 후, 일반 토큰 파싱 전에 AST로 파싱한다. 기본 출력은 축약 표기 구조를 유지하고, 풀어쓰기 표시 모드에서는 일반 회전열로 확장한다.
 
 - 커뮤테이터 `[X,Y]`: `X Y X' Y'`로 확장한다.
 - 컨쥬게이트 `X:Y`: `X Y X'`로 확장한다.
@@ -102,8 +102,10 @@ UI는 변환 결과를 다음 형태로 받는다.
 - 중첩 표현을 허용한다. 예를 들어 `R : [D R, U F]`처럼 컨쥬게이트 안에 커뮤테이터를 넣을 수 있다.
 - 3x3에 먼저 적용한다. FTO도 같은 문법을 사용할 예정이지만, 현재 FTO 변환기는 준비 중이다.
 - Square-1은 `/`가 실제 표기라 별도 설계 후 적용한다.
+- 커뮤테이터의 역공식은 `[X,Y] -> [Y,X]`로 표시한다.
+- 컨쥬게이트의 역공식은 `X:Y -> X:Y'` 구조로 표시한다. 여기서 `Y'`는 Y 공식 덩어리의 역공식이다.
 
-예상 해석은 다음과 같다.
+축약 입력의 풀어쓰기 해석은 다음과 같다.
 
 ```text
 [ R, U F]       -> R U F R' F' U'

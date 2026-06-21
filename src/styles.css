@@ -310,6 +310,55 @@ textarea::placeholder {
   gap: 16px;
 }
 
+.output-format {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: var(--canvas);
+}
+
+.output-format span {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.29;
+}
+
+.output-format__buttons {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  border-radius: 9999px;
+  padding: 4px;
+  background: var(--canvas-parchment);
+}
+
+.output-format__button {
+  min-height: 36px;
+  border-radius: 9999px;
+  padding: 8px 14px;
+  color: var(--primary);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.output-format__button[aria-pressed="true"] {
+  color: var(--on-dark);
+  background: var(--primary);
+}
+
+.output-format__button:focus-visible {
+  outline: 2px solid var(--primary-focus);
+  outline-offset: 3px;
+}
+
 .output-card {
   padding: 24px;
 }
@@ -425,6 +474,11 @@ textarea::placeholder {
 
   .puzzle-options {
     grid-template-columns: 1fr;
+  }
+
+  .output-format {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

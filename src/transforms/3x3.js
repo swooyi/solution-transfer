@@ -61,6 +61,16 @@ const MIRROR_RULES = {
   },
 };
 
+const OUTPUT_TYPES = [
+  "inverse",
+  "mirrorLeftRight",
+  "mirrorLeftRightInverse",
+  "mirrorFrontBack",
+  "mirrorFrontBackInverse",
+  "mirrorUpDown",
+  "mirrorUpDownInverse",
+];
+
 class NotationError extends Error {
   constructor(token) {
     super(`잘못된 3x3 표기입니다: ${token}`);
@@ -244,15 +254,17 @@ function parse3x3Expression(input) {
   const expression = input.trim();
 
   if (!expression) {
-    return [];
+    return createSequence([]);
   }
 
   const conjugateIndex = findTopLevelCharacter(expression, ":");
 
   if (conjugateIndex !== -1) {
-    const setupTokens = parse3x3Expression(expression.slice(0, conjugateIndex));
-    const targetTokens = parse3x3Expression(expression.slice(conjugateIndex + 1));
-    return [...setupTokens, ...targetTokens, ...invertTokens(setupTokens)];
+    return {
+      type: "conjugate",
+      setup: parse3x3Expression(expression.slice(0, conjugateIndex)),
+      target: parse3x3Expression(expression.slice(conjugateIndex + 1)),
+    };
   }
 
   if (expression[0] === "[") {
@@ -260,14 +272,11 @@ function parse3x3Expression(input) {
 
     if (closeIndex === expression.length - 1) {
       const [left, right] = splitCommutatorParts(expression.slice(1, -1));
-      const leftTokens = parse3x3Expression(left);
-      const rightTokens = parse3x3Expression(right);
-      return [
-        ...leftTokens,
-        ...rightTokens,
-        ...invertTokens(leftTokens),
-        ...invertTokens(rightTokens),
-      ];
+      return {
+        type: "commutator",
+        left: parse3x3Expression(left),
+        right: parse3x3Expression(right),
+      };
     }
   }
 
@@ -275,7 +284,7 @@ function parse3x3Expression(input) {
 }
 
 function parse3x3Sequence(input) {
-  const tokens = [];
+  const items = [];
   let segment = "";
   let index = 0;
 
@@ -283,13 +292,11 @@ function parse3x3Sequence(input) {
     const char = input[index];
 
     if (char === "[") {
-      if (segment.trim()) {
-        tokens.push(...parse3x3Algorithm(normalizeReadableSeparators(segment)));
-        segment = "";
-      }
+      pushSegmentItems(items, segment);
+      segment = "";
 
       const closeIndex = findMatchingBracket(input, index);
-      tokens.push(...parse3x3Expression(input.slice(index, closeIndex + 1)));
+      items.push(parse3x3Expression(input.slice(index, closeIndex + 1)));
       index = closeIndex + 1;
       continue;
     }
@@ -302,11 +309,138 @@ function parse3x3Sequence(input) {
     index += 1;
   }
 
-  if (segment.trim()) {
-    tokens.push(...parse3x3Algorithm(normalizeReadableSeparators(segment)));
+  pushSegmentItems(items, segment);
+
+  return createSequence(items);
+}
+
+function pushSegmentItems(items, segment) {
+  if (!segment.trim()) {
+    return;
   }
 
-  return tokens;
+  const tokens = parse3x3Algorithm(normalizeReadableSeparators(segment));
+  items.push(...tokens.map((token) => ({ type: "move", token })));
+}
+
+function createSequence(items) {
+  return {
+    type: "sequence",
+    items,
+  };
+}
+
+function expandAst(ast) {
+  if (ast.type === "move") {
+    return [ast.token];
+  }
+
+  if (ast.type === "sequence") {
+    return ast.items.flatMap(expandAst);
+  }
+
+  if (ast.type === "commutator") {
+    const left = expandAst(ast.left);
+    const right = expandAst(ast.right);
+    return [...left, ...right, ...invertTokens(left), ...invertTokens(right)];
+  }
+
+  if (ast.type === "conjugate") {
+    const setup = expandAst(ast.setup);
+    const target = expandAst(ast.target);
+    return [...setup, ...target, ...invertTokens(setup)];
+  }
+
+  throw new NotationError(ast.type);
+}
+
+function invertAst(ast) {
+  if (ast.type === "move") {
+    return {
+      type: "move",
+      token: invertToken(ast.token),
+    };
+  }
+
+  if (ast.type === "sequence") {
+    return createSequence([...ast.items].reverse().map(invertAst));
+  }
+
+  if (ast.type === "commutator") {
+    return {
+      type: "commutator",
+      left: ast.right,
+      right: ast.left,
+    };
+  }
+
+  if (ast.type === "conjugate") {
+    return {
+      type: "conjugate",
+      setup: ast.setup,
+      target: invertAst(ast.target),
+    };
+  }
+
+  throw new NotationError(ast.type);
+}
+
+function mirrorAst(ast, mirrorType) {
+  if (ast.type === "move") {
+    return {
+      type: "move",
+      token: mirrorToken(ast.token, mirrorType),
+    };
+  }
+
+  if (ast.type === "sequence") {
+    return createSequence(ast.items.map((item) => mirrorAst(item, mirrorType)));
+  }
+
+  if (ast.type === "commutator") {
+    return {
+      type: "commutator",
+      left: mirrorAst(ast.left, mirrorType),
+      right: mirrorAst(ast.right, mirrorType),
+    };
+  }
+
+  if (ast.type === "conjugate") {
+    return {
+      type: "conjugate",
+      setup: mirrorAst(ast.setup, mirrorType),
+      target: mirrorAst(ast.target, mirrorType),
+    };
+  }
+
+  throw new NotationError(ast.type);
+}
+
+function formatAst(ast) {
+  if (ast.type === "move") {
+    return formatToken(ast.token);
+  }
+
+  if (ast.type === "sequence") {
+    return ast.items.map(formatAst).filter(Boolean).join(" ");
+  }
+
+  if (ast.type === "commutator") {
+    return `[${formatAst(ast.left)}, ${formatAst(ast.right)}]`;
+  }
+
+  if (ast.type === "conjugate") {
+    return `${formatAst(ast.setup)} : ${formatAst(ast.target)}`;
+  }
+
+  throw new NotationError(ast.type);
+}
+
+function formatOutput(ast) {
+  return {
+    compact: formatAst(ast),
+    expanded: formatTokens(expandAst(ast)),
+  };
 }
 
 function splitLineComment(line) {
@@ -338,8 +472,27 @@ function appendComment(transformedAlgorithm, algorithmPart, comment) {
   return `${transformedAlgorithm}${spacing}${comment}`;
 }
 
+function appendCommentToOutput(output, algorithmPart, comment) {
+  return {
+    compact: appendComment(output.compact, algorithmPart, comment),
+    expanded: appendComment(output.expanded, algorithmPart, comment),
+  };
+}
+
 function normalizeReadableSeparators(algorithm) {
   return algorithm.replace(/[(),/]/g, " ");
+}
+
+function createEmptyLineOutput(algorithm, comment) {
+  return Object.fromEntries(
+    OUTPUT_TYPES.map((type) => [
+      type,
+      {
+        compact: appendComment("", algorithm, comment),
+        expanded: appendComment("", algorithm, comment),
+      },
+    ]),
+  );
 }
 
 function transform3x3Line(line) {
@@ -347,53 +500,39 @@ function transform3x3Line(line) {
   const trimmedAlgorithm = normalizeReadableSeparators(algorithm).trim();
 
   if (!trimmedAlgorithm) {
-    return {
-      inverse: appendComment("", algorithm, comment),
-      mirrorLeftRight: appendComment("", algorithm, comment),
-      mirrorLeftRightInverse: appendComment("", algorithm, comment),
-      mirrorFrontBack: appendComment("", algorithm, comment),
-      mirrorFrontBackInverse: appendComment("", algorithm, comment),
-      mirrorUpDown: appendComment("", algorithm, comment),
-      mirrorUpDownInverse: appendComment("", algorithm, comment),
-    };
+    return createEmptyLineOutput(algorithm, comment);
   }
 
-  const tokens = parse3x3Expression(algorithm);
-  const mirrorLeftRightTokens = tokens.map((token) =>
-    mirrorToken(token, "mirrorLeftRight"),
-  );
-  const mirrorFrontBackTokens = tokens.map((token) =>
-    mirrorToken(token, "mirrorFrontBack"),
-  );
-  const mirrorUpDownTokens = tokens.map((token) =>
-    mirrorToken(token, "mirrorUpDown"),
-  );
+  const ast = parse3x3Expression(algorithm);
+  const mirrorLeftRightAst = mirrorAst(ast, "mirrorLeftRight");
+  const mirrorFrontBackAst = mirrorAst(ast, "mirrorFrontBack");
+  const mirrorUpDownAst = mirrorAst(ast, "mirrorUpDown");
 
   return {
-    inverse: appendComment(formatTokens(invertTokens(tokens)), algorithm, comment),
-    mirrorLeftRight: appendComment(
-      formatTokens(mirrorLeftRightTokens),
+    inverse: appendCommentToOutput(formatOutput(invertAst(ast)), algorithm, comment),
+    mirrorLeftRight: appendCommentToOutput(
+      formatOutput(mirrorLeftRightAst),
       algorithm,
       comment,
     ),
-    mirrorLeftRightInverse: appendComment(
-      formatTokens(invertTokens(mirrorLeftRightTokens)),
+    mirrorLeftRightInverse: appendCommentToOutput(
+      formatOutput(invertAst(mirrorLeftRightAst)),
       algorithm,
       comment,
     ),
-    mirrorFrontBack: appendComment(
-      formatTokens(mirrorFrontBackTokens),
+    mirrorFrontBack: appendCommentToOutput(
+      formatOutput(mirrorFrontBackAst),
       algorithm,
       comment,
     ),
-    mirrorFrontBackInverse: appendComment(
-      formatTokens(invertTokens(mirrorFrontBackTokens)),
+    mirrorFrontBackInverse: appendCommentToOutput(
+      formatOutput(invertAst(mirrorFrontBackAst)),
       algorithm,
       comment,
     ),
-    mirrorUpDown: appendComment(formatTokens(mirrorUpDownTokens), algorithm, comment),
-    mirrorUpDownInverse: appendComment(
-      formatTokens(invertTokens(mirrorUpDownTokens)),
+    mirrorUpDown: appendCommentToOutput(formatOutput(mirrorUpDownAst), algorithm, comment),
+    mirrorUpDownInverse: appendCommentToOutput(
+      formatOutput(invertAst(mirrorUpDownAst)),
       algorithm,
       comment,
     ),
@@ -403,20 +542,14 @@ function transform3x3Line(line) {
 export function transform3x3Algorithm(input) {
   const lines = input.replace(/\r\n/g, "\n").split("\n");
   const transformedLines = lines.map(transform3x3Line);
-  const outputTypes = [
-    "inverse",
-    "mirrorLeftRight",
-    "mirrorLeftRightInverse",
-    "mirrorFrontBack",
-    "mirrorFrontBackInverse",
-    "mirrorUpDown",
-    "mirrorUpDownInverse",
-  ];
 
   return Object.fromEntries(
-    outputTypes.map((type) => [
+    OUTPUT_TYPES.map((type) => [
       type,
-      transformedLines.map((line) => line[type]).join("\n"),
+      {
+        compact: transformedLines.map((line) => line[type].compact).join("\n"),
+        expanded: transformedLines.map((line) => line[type].expanded).join("\n"),
+      },
     ]),
   );
 }
