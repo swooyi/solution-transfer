@@ -188,6 +188,127 @@ function invertTokens(tokens) {
   return [...tokens].reverse().map(invertToken);
 }
 
+function findMatchingBracket(input, openIndex) {
+  let depth = 0;
+
+  for (let index = openIndex; index < input.length; index += 1) {
+    if (input[index] === "[") {
+      depth += 1;
+    }
+
+    if (input[index] === "]") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  throw new NotationError("[");
+}
+
+function findTopLevelCharacter(input, character) {
+  let depth = 0;
+
+  for (let index = 0; index < input.length; index += 1) {
+    if (input[index] === "[") {
+      depth += 1;
+      continue;
+    }
+
+    if (input[index] === "]") {
+      depth -= 1;
+      continue;
+    }
+
+    if (depth === 0 && input[index] === character) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function splitCommutatorParts(input) {
+  const commaIndex = findTopLevelCharacter(input, ",");
+
+  if (commaIndex === -1) {
+    throw new NotationError(",");
+  }
+
+  return [input.slice(0, commaIndex), input.slice(commaIndex + 1)];
+}
+
+function parse3x3Expression(input) {
+  const expression = input.trim();
+
+  if (!expression) {
+    return [];
+  }
+
+  const conjugateIndex = findTopLevelCharacter(expression, ":");
+
+  if (conjugateIndex !== -1) {
+    const setupTokens = parse3x3Expression(expression.slice(0, conjugateIndex));
+    const targetTokens = parse3x3Expression(expression.slice(conjugateIndex + 1));
+    return [...setupTokens, ...targetTokens, ...invertTokens(setupTokens)];
+  }
+
+  if (expression[0] === "[") {
+    const closeIndex = findMatchingBracket(expression, 0);
+
+    if (closeIndex === expression.length - 1) {
+      const [left, right] = splitCommutatorParts(expression.slice(1, -1));
+      const leftTokens = parse3x3Expression(left);
+      const rightTokens = parse3x3Expression(right);
+      return [
+        ...leftTokens,
+        ...rightTokens,
+        ...invertTokens(leftTokens),
+        ...invertTokens(rightTokens),
+      ];
+    }
+  }
+
+  return parse3x3Sequence(expression);
+}
+
+function parse3x3Sequence(input) {
+  const tokens = [];
+  let segment = "";
+  let index = 0;
+
+  while (index < input.length) {
+    const char = input[index];
+
+    if (char === "[") {
+      if (segment.trim()) {
+        tokens.push(...parse3x3Algorithm(normalizeReadableSeparators(segment)));
+        segment = "";
+      }
+
+      const closeIndex = findMatchingBracket(input, index);
+      tokens.push(...parse3x3Expression(input.slice(index, closeIndex + 1)));
+      index = closeIndex + 1;
+      continue;
+    }
+
+    if (char === "]" || char === ":") {
+      throw new NotationError(char);
+    }
+
+    segment += char;
+    index += 1;
+  }
+
+  if (segment.trim()) {
+    tokens.push(...parse3x3Algorithm(normalizeReadableSeparators(segment)));
+  }
+
+  return tokens;
+}
+
 function splitLineComment(line) {
   const commentStart = line.indexOf("//");
 
@@ -237,7 +358,7 @@ function transform3x3Line(line) {
     };
   }
 
-  const tokens = parse3x3Algorithm(trimmedAlgorithm);
+  const tokens = parse3x3Expression(algorithm);
   const mirrorLeftRightTokens = tokens.map((token) =>
     mirrorToken(token, "mirrorLeftRight"),
   );

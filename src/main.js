@@ -183,6 +183,8 @@ function render() {
                   F R U R' U' F'
                   Rw U Rw' U'
                   x y' R2 Fw2 M'
+                  [R, U F]
+                  R : U F
 
                   // 뒤의 내용은 라인 주석으로 처리되어 그대로 출력됩니다.
                   예: R U R' U' // 트위스트
