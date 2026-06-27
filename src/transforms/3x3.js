@@ -34,34 +34,49 @@ const BASE_TOKENS = [
   "l",
 ];
 
-const MIRROR_RULES = {
-  mirrorLeftRight: {
-    invertOnly: new Set(["U", "D", "F", "B", "S", "E", "y", "z"]),
-    keep: new Set(["M", "x"]),
-    swap: {
-      R: "L",
-      L: "R",
-    },
-  },
-  mirrorFrontBack: {
-    invertOnly: new Set(["U", "D", "R", "L", "M", "E", "x", "y"]),
-    keep: new Set(["S", "z"]),
-    swap: {
-      F: "B",
-      B: "F",
-    },
-  },
-  mirrorUpDown: {
-    invertOnly: new Set(["F", "B", "R", "L", "M", "S", "x", "z"]),
-    keep: new Set(["E", "y"]),
-    swap: {
-      U: "D",
-      D: "U",
-    },
-  },
+const FACE_VECTORS = {
+  R: [1, 0, 0],
+  L: [-1, 0, 0],
+  U: [0, 1, 0],
+  D: [0, -1, 0],
+  F: [0, 0, 1],
+  B: [0, 0, -1],
+};
+
+const MIRROR_MATRICES = {
+  mirrorLeftRight: [
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ],
+  mirrorFrontBack: [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, -1],
+  ],
+  mirrorUpDown: [
+    [1, 0, 0],
+    [0, -1, 0],
+    [0, 0, 1],
+  ],
+};
+
+const ROTATION_VECTORS = {
+  x: FACE_VECTORS.R,
+  y: FACE_VECTORS.U,
+  z: FACE_VECTORS.F,
+};
+
+const SLICE_VECTORS = {
+  M: FACE_VECTORS.L,
+  E: FACE_VECTORS.D,
+  S: FACE_VECTORS.F,
 };
 
 const OUTPUT_TYPES = [
+  "baseAlgorithm",
+  "viewpoint",
+  "viewpointInverse",
   "inverse",
   "mirrorLeftRight",
   "mirrorLeftRightInverse",
@@ -163,35 +178,218 @@ function invertToken(token) {
   };
 }
 
-function mirrorToken(token, mirrorType) {
-  const rule = MIRROR_RULES[mirrorType];
+function multiplyMatrixVector(matrix, vector) {
+  return matrix.map((row) =>
+    row.reduce((sum, value, index) => sum + value * vector[index], 0),
+  );
+}
 
-  if (rule.keep.has(token.face)) {
-    return token;
-  }
+function multiplyVector(vector, scalar) {
+  return vector.map((value) => value * scalar);
+}
 
-  if (rule.swap[token.face]) {
+function dotVectors(left, right) {
+  return left.reduce((sum, value, index) => sum + value * right[index], 0);
+}
+
+function crossVectors(left, right) {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0],
+  ];
+}
+
+function determinant3x3(matrix) {
+  const [[a, b, c], [d, e, f], [g, h, i]] = matrix;
+  return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+}
+
+function vectorKey(vector) {
+  return vector.join(",");
+}
+
+function findVectorName(vector, vectorMap) {
+  const key = vectorKey(vector);
+  return Object.entries(vectorMap).find(([, candidate]) => vectorKey(candidate) === key)?.[0];
+}
+
+function findAxisToken(vector, vectorMap) {
+  const token = findVectorName(vector, vectorMap);
+
+  if (token) {
     return {
-      ...token,
-      base: `${rule.swap[token.face]}${token.isWide ? "w" : ""}`,
-      face: rule.swap[token.face],
-      suffix: invertSuffix(token.suffix),
+      token,
+      invertDirection: false,
     };
   }
 
-  if (rule.invertOnly.has(token.face)) {
-    return invertToken(token);
+  const inverseToken = findVectorName(multiplyVector(vector, -1), vectorMap);
+
+  if (inverseToken) {
+    return {
+      token: inverseToken,
+      invertDirection: true,
+    };
+  }
+
+  return null;
+}
+
+function createMatrixFromBasis(oldBasis, newBasis) {
+  const columns = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ];
+
+  oldBasis.forEach((oldVector, basisIndex) => {
+    const axisIndex = oldVector.findIndex((value) => value !== 0);
+    const sign = oldVector[axisIndex];
+    columns[axisIndex] = multiplyVector(newBasis[basisIndex], sign);
+  });
+
+  return [0, 1, 2].map((rowIndex) => columns.map((column) => column[rowIndex]));
+}
+
+function createViewpointMatrix(viewpoint) {
+  const xFace = viewpoint?.xFace ?? "U";
+  const yFace = viewpoint?.yFace ?? "F";
+  const xVector = FACE_VECTORS[xFace];
+  const yVector = FACE_VECTORS[yFace];
+
+  if (!xVector || !yVector || dotVectors(xVector, yVector) !== 0) {
+    throw new NotationError(`{${xFace},${yFace}}`);
+  }
+
+  return createMatrixFromBasis(
+    [xVector, yVector, crossVectors(xVector, yVector)],
+    [FACE_VECTORS.U, FACE_VECTORS.F, crossVectors(FACE_VECTORS.U, FACE_VECTORS.F)],
+  );
+}
+
+function mirrorFaceToken(token, matrix) {
+  const mirroredFace = findVectorName(
+    multiplyMatrixVector(matrix, FACE_VECTORS[token.face]),
+    FACE_VECTORS,
+  );
+
+  if (!mirroredFace) {
+    throw new NotationError(formatToken(token));
+  }
+
+  return {
+    ...token,
+    base: `${mirroredFace}${token.isWide ? "w" : ""}`,
+    face: mirroredFace,
+    suffix: invertSuffix(token.suffix),
+  };
+}
+
+function transformFaceToken(token, matrix, shouldInvertSuffix) {
+  const transformedFace = findVectorName(
+    multiplyMatrixVector(matrix, FACE_VECTORS[token.face]),
+    FACE_VECTORS,
+  );
+
+  if (!transformedFace) {
+    throw new NotationError(formatToken(token));
+  }
+
+  return {
+    ...token,
+    base: `${transformedFace}${token.isWide ? "w" : ""}`,
+    face: transformedFace,
+    suffix: shouldInvertSuffix ? invertSuffix(token.suffix) : token.suffix,
+  };
+}
+
+function mirrorAxisToken(token, matrix, vectorMap) {
+  const determinant = determinant3x3(matrix);
+  const mirroredAxis = findAxisToken(
+    multiplyVector(multiplyMatrixVector(matrix, vectorMap[token.face]), determinant),
+    vectorMap,
+  );
+
+  if (!mirroredAxis) {
+    throw new NotationError(formatToken(token));
+  }
+
+  return {
+    ...token,
+    base: mirroredAxis.token,
+    face: mirroredAxis.token,
+    suffix: mirroredAxis.invertDirection ? invertSuffix(token.suffix) : token.suffix,
+  };
+}
+
+function transformAxisToken(token, matrix, vectorMap) {
+  const transformedAxis = findAxisToken(
+    multiplyMatrixVector(matrix, vectorMap[token.face]),
+    vectorMap,
+  );
+
+  if (!transformedAxis) {
+    throw new NotationError(formatToken(token));
+  }
+
+  return {
+    ...token,
+    base: transformedAxis.token,
+    face: transformedAxis.token,
+    suffix: transformedAxis.invertDirection ? invertSuffix(token.suffix) : token.suffix,
+  };
+}
+
+function mirrorToken(token, mirrorType) {
+  const matrix = MIRROR_MATRICES[mirrorType];
+
+  if (!matrix) {
+    throw new NotationError(mirrorType);
+  }
+
+  if (token.face in FACE_VECTORS) {
+    return mirrorFaceToken(token, matrix);
+  }
+
+  if (token.face in ROTATION_VECTORS) {
+    return mirrorAxisToken(token, matrix, ROTATION_VECTORS);
+  }
+
+  if (token.face in SLICE_VECTORS) {
+    return mirrorAxisToken(token, matrix, SLICE_VECTORS);
   }
 
   throw new NotationError(formatToken(token));
 }
 
-function formatToken(token) {
-  return `${token.base}${token.suffix}`;
+function transformViewpointToken(token, matrix) {
+  if (token.face in FACE_VECTORS) {
+    return transformFaceToken(token, matrix, false);
+  }
+
+  if (token.face in ROTATION_VECTORS) {
+    return transformAxisToken(token, matrix, ROTATION_VECTORS);
+  }
+
+  if (token.face in SLICE_VECTORS) {
+    return transformAxisToken(token, matrix, SLICE_VECTORS);
+  }
+
+  throw new NotationError(formatToken(token));
 }
 
-function formatTokens(tokens) {
-  return tokens.map(formatToken).join(" ");
+function formatToken(token, formatOptions = {}) {
+  const base =
+    formatOptions.wideMoveStyle === "lowercase" && token.isWide
+      ? token.base[0].toLowerCase()
+      : token.base;
+
+  return `${base}${token.suffix}`;
+}
+
+function formatTokens(tokens, formatOptions = {}) {
+  return tokens.map((token) => formatToken(token, formatOptions)).join(" ");
 }
 
 function invertTokens(tokens) {
@@ -416,30 +614,61 @@ function mirrorAst(ast, mirrorType) {
   throw new NotationError(ast.type);
 }
 
-function formatAst(ast) {
+function transformViewpointAst(ast, matrix) {
   if (ast.type === "move") {
-    return formatToken(ast.token);
+    return {
+      type: "move",
+      token: transformViewpointToken(ast.token, matrix),
+    };
   }
 
   if (ast.type === "sequence") {
-    return ast.items.map(formatAst).filter(Boolean).join(" ");
+    return createSequence(ast.items.map((item) => transformViewpointAst(item, matrix)));
   }
 
   if (ast.type === "commutator") {
-    return `[${formatAst(ast.left)}, ${formatAst(ast.right)}]`;
+    return {
+      type: "commutator",
+      left: transformViewpointAst(ast.left, matrix),
+      right: transformViewpointAst(ast.right, matrix),
+    };
   }
 
   if (ast.type === "conjugate") {
-    return `${formatAst(ast.setup)} : ${formatAst(ast.target)}`;
+    return {
+      type: "conjugate",
+      setup: transformViewpointAst(ast.setup, matrix),
+      target: transformViewpointAst(ast.target, matrix),
+    };
   }
 
   throw new NotationError(ast.type);
 }
 
-function formatOutput(ast) {
+function formatAst(ast, formatOptions = {}) {
+  if (ast.type === "move") {
+    return formatToken(ast.token, formatOptions);
+  }
+
+  if (ast.type === "sequence") {
+    return ast.items.map((item) => formatAst(item, formatOptions)).filter(Boolean).join(" ");
+  }
+
+  if (ast.type === "commutator") {
+    return `[${formatAst(ast.left, formatOptions)}, ${formatAst(ast.right, formatOptions)}]`;
+  }
+
+  if (ast.type === "conjugate") {
+    return `${formatAst(ast.setup, formatOptions)} : ${formatAst(ast.target, formatOptions)}`;
+  }
+
+  throw new NotationError(ast.type);
+}
+
+function formatOutput(ast, formatOptions = {}) {
   return {
-    compact: formatAst(ast),
-    expanded: formatTokens(expandAst(ast)),
+    compact: formatAst(ast, formatOptions),
+    expanded: formatTokens(expandAst(ast), formatOptions),
   };
 }
 
@@ -495,7 +724,7 @@ function createEmptyLineOutput(algorithm, comment) {
   );
 }
 
-function transform3x3Line(line) {
+function transform3x3Line(line, viewpointMatrix, formatOptions) {
   const { algorithm, comment } = splitLineComment(line);
   const trimmedAlgorithm = normalizeReadableSeparators(algorithm).trim();
 
@@ -507,41 +736,59 @@ function transform3x3Line(line) {
   const mirrorLeftRightAst = mirrorAst(ast, "mirrorLeftRight");
   const mirrorFrontBackAst = mirrorAst(ast, "mirrorFrontBack");
   const mirrorUpDownAst = mirrorAst(ast, "mirrorUpDown");
+  const viewpointAst = transformViewpointAst(ast, viewpointMatrix);
 
   return {
-    inverse: appendCommentToOutput(formatOutput(invertAst(ast)), algorithm, comment),
+    baseAlgorithm: appendCommentToOutput(formatOutput(ast, formatOptions), algorithm, comment),
+    viewpoint: appendCommentToOutput(formatOutput(viewpointAst, formatOptions), algorithm, comment),
+    viewpointInverse: appendCommentToOutput(
+      formatOutput(invertAst(viewpointAst), formatOptions),
+      algorithm,
+      comment,
+    ),
+    inverse: appendCommentToOutput(formatOutput(invertAst(ast), formatOptions), algorithm, comment),
     mirrorLeftRight: appendCommentToOutput(
-      formatOutput(mirrorLeftRightAst),
+      formatOutput(mirrorLeftRightAst, formatOptions),
       algorithm,
       comment,
     ),
     mirrorLeftRightInverse: appendCommentToOutput(
-      formatOutput(invertAst(mirrorLeftRightAst)),
+      formatOutput(invertAst(mirrorLeftRightAst), formatOptions),
       algorithm,
       comment,
     ),
     mirrorFrontBack: appendCommentToOutput(
-      formatOutput(mirrorFrontBackAst),
+      formatOutput(mirrorFrontBackAst, formatOptions),
       algorithm,
       comment,
     ),
     mirrorFrontBackInverse: appendCommentToOutput(
-      formatOutput(invertAst(mirrorFrontBackAst)),
+      formatOutput(invertAst(mirrorFrontBackAst), formatOptions),
       algorithm,
       comment,
     ),
-    mirrorUpDown: appendCommentToOutput(formatOutput(mirrorUpDownAst), algorithm, comment),
+    mirrorUpDown: appendCommentToOutput(
+      formatOutput(mirrorUpDownAst, formatOptions),
+      algorithm,
+      comment,
+    ),
     mirrorUpDownInverse: appendCommentToOutput(
-      formatOutput(invertAst(mirrorUpDownAst)),
+      formatOutput(invertAst(mirrorUpDownAst), formatOptions),
       algorithm,
       comment,
     ),
   };
 }
 
-export function transform3x3Algorithm(input) {
+export function transform3x3Algorithm(input, options = {}) {
   const lines = input.replace(/\r\n/g, "\n").split("\n");
-  const transformedLines = lines.map(transform3x3Line);
+  const viewpointMatrix = createViewpointMatrix(options.viewpoint);
+  const formatOptions = {
+    wideMoveStyle: options.wideMoveStyle ?? "wide",
+  };
+  const transformedLines = lines.map((line) =>
+    transform3x3Line(line, viewpointMatrix, formatOptions),
+  );
 
   return Object.fromEntries(
     OUTPUT_TYPES.map((type) => [
