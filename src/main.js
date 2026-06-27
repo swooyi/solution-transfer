@@ -29,11 +29,7 @@ const outputCardsByPuzzle = {
     { title: "전후대칭", types: ["mirrorFrontBack", "mirrorFrontBackInverse"] },
     { title: "상하대칭", types: ["mirrorUpDown", "mirrorUpDownInverse"] },
   ],
-  fto: [
-    { title: "역공식", types: ["inverse"] },
-    { title: "좌우대칭", types: ["mirrorLeftRight", "mirrorLeftRightInverse"] },
-    { title: "전후대칭", types: ["mirrorFrontBack", "mirrorFrontBackInverse"] },
-  ],
+  fto: [{ title: "역공식", types: ["inverse"] }],
 };
 
 const state = {
@@ -78,7 +74,7 @@ function renderPuzzleOptions() {
 }
 
 function getOutputDisplay(type) {
-  if (state.selectedPuzzle !== "3x3") {
+  if (state.selectedPuzzle === "square1") {
     return {
       value: "",
       message: "변환 규칙 준비 중",
